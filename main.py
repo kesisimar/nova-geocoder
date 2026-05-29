@@ -3,13 +3,13 @@ from geopy.geocoders import Nominatim
 import geopy.exc as geopy_exc
 import google.generativeai as genai
 
-# Ρύθμιση Σελίδας στον Browser
+# Ρύθμιση Σελίδας
 st.set_page_config(page_title="Greek Geocoder AI", page_icon="📍", layout="centered")
 
 st.title("🔍 Greek Geocoder AI 🇬🇷")
-st.write("Ιστορική Γεωγραφική Αναζήτηση για όλα τα χωριά και τις πόλεις της Ελλάδας.")
+st.write("Ιστορική Γεωγραφική Αναζήτηση και ΤΚ για την εργασία σου.")
 
-# Ασφαλής ανάγνωση του API KEY αποκλειστικά από τα Secrets του Streamlit
+# Ασφαλής ανάγνωση του API KEY από τα Secrets του Streamlit
 if "GEMINI_API_KEY" in st.secrets:
     GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
     try:
@@ -17,29 +17,27 @@ if "GEMINI_API_KEY" in st.secrets:
     except Exception as e:
         st.error(f"Σφάλμα ρύθμισης AI: {e}")
 else:
-    st.warning("⚠️ Το API Key δεν έχει ρυθμιστεί ακόμα στα Secrets του Streamlit.")
+    st.warning("⚠️ Το API Key δεν έχει ρυθμιστεί στα Secrets του Streamlit.")
     GEMINI_API_KEY = None
 
-# Φόρμα Εισαγωγής Στοιχείων
+# Φόρμα Εισαγωγής
 with st.form("geocoder_global_form"):
-    street = st.text_input("Οδός / Περιοχή / Χωριό:", placeholder="π.χ. Σοχός, Ζαγκλιβέρι, Ανώγεια, Σουφλί")
+    street = st.text_input("Οδός / Περιοχή / Χωριό:", placeholder="π.χ. Σοχός, Ζαγκλιβέρι")
     col1, col2 = st.columns(2)
     with col1:
-        number = st.text_input("Αριθμός (αν υπάρχει):", placeholder="e.g. 0")
+        number = st.text_input("Αριθμός:", placeholder="0")
     with col2:
-        postal = st.text_input("Ταχυδρομικός Κώδικας (Τ.Κ.):", placeholder="e.g. 57002")
-        
+        postal = st.text_input("Ταχυδρομικός Κώδικας (Τ.Κ.):", placeholder="57002")
     submit_button = st.form_submit_button("🔍 Εύρεση Στοιχείων", type="primary")
 
 if submit_button:
     if not street:
-        st.warning("⚠️ Παρακαλώ εισάγετε μια οδό, περιοχή ή χωριό.")
+        st.warning("⚠️ Παρακαλώ εισάγετε μια τοποθεσία.")
     elif not GEMINI_API_KEY:
-        st.error("❌ Δεν βρέθηκε ενεργό API Key στα Secrets του Streamlit. Παρακαλώ προσθέστε το.")
+        st.error("❌ Δεν βρέθηκε API Key.")
     else:
-        with st.spinner("🔄 Γίνεται αυτόματη αναζήτηση και ανάλυση Δήμων..."):
+        with st.spinner("🔄 Γίνεται ανάλυση..."):
             query = f"{street} {number}, {postal}, Greece" if postal else f"{street} {number}, Greece"
-            
             try:
                 geolocator = Nominatim(user_agent="greek_geocoder_final_prod")
                 location = geolocator.geocode(query, addressdetails=True, language="el", country_codes="gr", timeout=10)
@@ -49,22 +47,21 @@ if submit_button:
                     nomos = addr.get("county") or addr.get("state_district") or addr.get("state") or "—"
                     dimos = addr.get("municipality") or addr.get("city") or addr.get("town") or "—"
                     
-                    lat = f"{float(location.latitude):.6f}"
-                    lon = f"{float(location.longitude):.6f}"
-                    
-                    # --- ΠΡΟΧΩΡΗΜΕΝΟ PROMPT (ΕΤΟΣ 2009 - ΜΟΝΟ ΔΗΜΟΙ) ---
-                    pre_dimos = "—"
-                    pre_nomos = "—"
+                    # --- ΠΡΟΧΩΡΗΜΕΝΟ PROMPT ΜΕ ΤΚ ---
+                    pre_dimos, pre_nomos = "—", "—"
+                    current_tk, old_tk = "—", "—"
                     
                     prompt = (
-                        f"Είσαι κορυφαίος γεωγράφος της Ελλάδας. Με βάση τη σημερινή τοποθεσία '{location.address}', "
-                        f"τον τρέχοντα Δήμο '{dimos}' και τον Νομό '{nomos}', βρες τα εξής στοιχεία:\n"
-                        f"1) Ποιος ήταν ο Δήμος (ΑΠΟΚΛΕΙΣΤΙΚΑ ΔΗΜΟΣ, ΟΧΙ ΚΟΙΝΟΤΗΤΑ) στον οποίο ανήκε η τοποθεσία το έτος 2009 (προ-Καλλικράτη επί Καποδίστρια).\n"
-                        f"2) Ποιος ήταν ο Νομός το έτος 2009.\n"
-                        f"Αν το 2009 η περιοχή ήταν αυτόνομη Κοινότητα, βρες σε ποιον Δήμο Καποδίστρια υπαγόταν ή ανάφερέ τον ως Δήμο. Μην γράψεις τη λέξη 'Κοινότητα'.\n"
-                        f"Απάντησε αυστηρά και πολύ σύντομα σε αυτή τη μορφή χωρίς άλλα λόγια:\n"
-                        f"ΠΡΟ_ΔΗΜΟΣ: [Όνομα Δήμου το 2009]\n"
-                        f"ΠΡΟ_ΝΟΜΟΣ: [Όνομα Νομού το 2009]"
+                        f"Είσαι γεωγράφος. Τοποθεσία '{location.address}'.\n"
+                        f"1) Ποιος είναι ο επίσημος Τρέχων ΤΚ;\n"
+                        f"2) Υπήρχε άλλος (παλαιότερος) ΤΚ στην περιοχή;\n"
+                        f"3) Δήμος (Καποδίστριας) το 2009.\n"
+                        f"4) Νομός το 2009.\n"
+                        f"Απάντησε αυστηρά χωρίς άλλα λόγια:\n"
+                        f"ΤΡΕΧΩΝ_ΤΚ: [ΤΚ]\n"
+                        f"ΠΑΛΙΟΣ_ΤΚ: [ΤΚ ή 'Δεν υπάρχει']\n"
+                        f"ΠΡΟ_ΔΗΜΟΣ: [Δήμος 2009]\n"
+                        f"ΠΡΟ_ΝΟΜΟΣ: [Νομός 2009]"
                     )
                     
                     try:
@@ -73,36 +70,27 @@ if submit_button:
                         ai_text = response.text.strip()
                         
                         for line in ai_text.split('\n'):
-                            if "ΠΡΟ_ΔΗΜΟΣ:" in line:
-                                pre_dimos = line.replace("ΠΡΟ_ΔΗΜΟΣ:", "").strip()
-                            if "ΠΡΟ_ΝΟΜΟΣ:" in line:
-                                pre_nomos = line.replace("ΠΡΟ_ΝΟΜΟΣ:", "").strip()
-                    except Exception as ai_err:
-                        pre_dimos = "Σφάλμα AI"
-                        pre_nomos = f"{ai_err}"
+                            if "ΤΡΕΧΩΝ_ΤΚ:" in line: current_tk = line.replace("ΤΡΕΧΩΝ_ΤΚ:", "").strip()
+                            if "ΠΑΛΙΟΣ_ΤΚ:" in line: old_tk = line.replace("ΠΑΛΙΟΣ_ΤΚ:", "").strip()
+                            if "ΠΡΟ_ΔΗΜΟΣ:" in line: pre_dimos = line.replace("ΠΡΟ_ΔΗΜΟΣ:", "").strip()
+                            if "ΠΡΟ_ΝΟΜΟΣ:" in line: pre_nomos = line.replace("ΠΡΟ_ΝΟΜΟΣ:", "").strip()
+                    except Exception:
+                        pass
 
-                    # --- ΕΜΦΑΝΙΣΗ ΑΠΟΤΕΛΕΣΜΑΤΩΝ ΣΤΗΝ ΟΘΟΝΗ ---
+                    # --- ΕΜΦΑΝΙΣΗ ΑΠΟΤΕΛΕΣΜΑΤΩΝ ---
                     st.success("✅ Τα στοιχεία εντοπίστηκαν!")
-                    st.markdown(f"### 📍 Αναζήτηση: *{street} {number}*")
-                    
                     c1, c2 = st.columns(2)
                     with c1:
-                        st.info("🏛️ Σημερινή Διοικητική Μορφή")
+                        st.info("🏛️ Σημερινή Μορφή")
+                        st.metric(label="Τρέχων ΤΚ", value=current_tk)
                         st.metric(label="Δήμος (Καλλικράτης)", value=dimos)
-                        st.metric(label="Νομός / Περιφέρεια", value=nomos)
-                        st.metric(label="🌍 Γεωγραφικό Πλάτος (Lat)", value=f"{lat}°")
-                    
                     with c2:
-                        st.success("📜 Ιστορική Μορφή (Έτος 2009)")
-                        st.metric(label="Δήμος (Καποδίστριας 2009)", value=pre_dimos)
-                        st.metric(label="Ιστορικός Νομός (2009)", value=pre_nomos)
-                        st.metric(label="🧭 Γεωγραφικό Μήκος (Lon)", value=f"{lon}°")
+                        st.success("📜 Ιστορική Μορφή (2009)")
+                        st.metric(label="Παλιός ΤΚ", value=old_tk)
+                        st.metric(label="Δήμος (Καποδίστριας)", value=pre_dimos)
                     
-                    st.info(f"🗺️ **Πλήρης Διεύθυνση (OSM):**\n{location.address}")
+                    st.info(f"🗺️ **Πλήρης Διεύθυνση:**\n{location.address}")
                 else:
-                    st.error("❌ Η διεύθυνση δεν βρέθηκε στο χάρτη. Δοκιμάστε ξανά.")
-
-            except geopy_exc.GeocoderTimedOut:
-                st.error("⚠️ Η αναζήτηση χρονομετρήθηκε. Δοκιμάστε ξανά.")
+                    st.error("❌ Δεν βρέθηκε η τοποθεσία.")
             except Exception as e:
                 st.error(f"⚠️ Σφάλμα: {e}")
