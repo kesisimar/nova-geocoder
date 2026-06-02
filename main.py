@@ -33,35 +33,33 @@ if submit_button:
             query = f"{street} {number}, {postal}, Greece" if postal else f"{street} {number}, Greece"
             
             try:
-                geolocator = Nominatim(user_agent="greek_geocoder_v3")
+                geolocator = Nominatim(user_agent="greek_geocoder_v2")
                 location = geolocator.geocode(query, addressdetails=True, language="el", country_codes="gr", timeout=15)
 
                 if location:
+                    # Λήψη όλων των διαθέσιμων δεδομένων διεύθυνσης για context
                     addr_data = location.raw.get("address", {})
                     address_context = str(addr_data)
                     
-                    # Ρύθμιση μοντέλου για μέγιστη ακρίβεια (Temperature 0)
-                    model = genai.GenerativeModel('gemini-1.5-pro')
-                    generation_config = {"temperature": 0.0}
+                    lat = f"{float(location.latitude):.6f}"
+                    lon = f"{float(location.longitude):.6f}"
                     
-                    # ΕΝΙΣΧΥΜΕΝΟ PROMPT ΜΕ ΕΣΤΙΑΣΗ ΣΤΗΝ ΟΝΟΜΑΣΙΑ
+                    # ΕΝΙΣΧΥΜΕΝΟ PROMPT
                     prompt = (
-                        f"Είσαι ο απόλυτος ειδικός στην ιστορική διοικητική διαίρεση της Ελλάδας (1997-2010).\n"
-                        f"Ο χρήστης ζητά πληροφορίες για την τοποθεσία: '{street}'.\n\n"
-                        f"ΟΔΗΓΙΕΣ:\n"
-                        f"1. Αγνόησε οποιοδήποτε γεωγραφικό δεδομένο σου δίνει το Nominatim (OSM) αν αυτό αναφέρεται στον 'Καλλικράτη' (μετά το 2011).\n"
-                        f"2. Βασίσου αποκλειστικά στις γνώσεις σου για το σχέδιο 'Καποδίστριας' (1997-2010).\n"
-                        f"3. Βρες τον Δήμο Καποδίστρια στον οποίο ανήκε οικισμός '{street}' το έτος 2009. Αν ο οικισμός ήταν αυτόνομη Κοινότητα, βρες τον Δήμο στον οποίο ενσωματώθηκε.\n"
-                        f"4. Βρες τον Νομό όπως ήταν το 2009.\n"
-                        f"5. ΑΠΑΝΤΗΣΗ ΜΟΝΟ ΣΤΗ ΜΟΡΦΗ:\n"
+                        f"Είσαι κορυφαίος γεωγράφος της Ελλάδας με εξειδίκευση στη διοικητική διαίρεση 'Καποδίστριας' (1997-2010).\n"
+                        f"Πληροφορίες τοποθεσίας από χάρτη: {location.address}\n"
+                        f"Αναλυτικά δεδομένα: {address_context}\n\n"
+                        f"Ζητούμενο:\n"
+                        f"1. Βρες τον Δήμο (Καποδίστρια) στον οποίο ανήκε η περιοχή το 2009. Αν ήταν Κοινότητα, βρες τον Δήμο στον οποίο υπαγόταν.\n"
+                        f"2. Βρες τον Νομό (όπως ήταν το 2009).\n"
+                        f"3. Απάντησε ΑΥΣΤΗΡΑ με το format:\n"
                         f"ΠΡΟ_ΔΗΜΟΣ: [Όνομα Δήμου]\n"
-                        f"ΠΡΟ_ΝΟΜΟΣ: [Όνομα Νομού]\n\n"
-                        f"ΠΡΟΣΟΧΗ:\n"
-                        f"- Αν ο οικισμός '{street}' δεν ανήκε σε κάποιον Δήμο Καποδίστρια, απάντησε 'ΑΓΝΩΣΤΟ'.\n"
-                        f"- ΜΗΝ προσθέσεις εισαγωγικά σχόλια, επεξηγήσεις ή τη λέξη 'Κοινότητα'."
+                        f"ΠΡΟ_ΝΟΜΟΣ: [Όνομα Νομού]\n"
+                        f"Μην προσθέσεις εισαγωγές, επεξηγήσεις ή τη λέξη 'Κοινότητα'."
                     )
                     
-                    response = model.generate_content(prompt, generation_config=generation_config)
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    response = model.generate_content(prompt)
                     ai_text = response.text.strip()
                     
                     # Parsing αποτελεσμάτων
@@ -83,7 +81,7 @@ if submit_button:
                         st.metric(label="Δήμος (Καποδίστριας)", value=pre_dimos)
                         st.metric(label="Νομός (2009)", value=pre_nomos)
                 else:
-                    st.error("❌ Δεν βρέθηκε η τοποθεσία στο χάρτη. Δοκιμάστε πιο συγκεκριμένα στοιχεία.")
+                    st.error("❌ Δεν βρέθηκε η τοποθεσία. Δοκιμάστε πιο συγκεκριμένα στοιχεία.")
 
             except Exception as e:
                 st.error(f"⚠️ Σφάλμα συστήματος: {e}")
