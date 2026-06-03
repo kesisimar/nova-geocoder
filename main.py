@@ -67,7 +67,7 @@ if submit_button:
                         pre_nomos = "—"
 
                     # Comprehensive prompt for LLM fallback with historical context
-                    prompt = # Βελτιωμένο και αυστηρό prompt
+                    
                     prompt = (
                         f"Είσαι έμπειρος γεωγράφος με ειδίκευση στη διοικητική διαίρεση της Ελλάδας την περίοδο 1997-2010 (Καποδίστριας).\n\n"
                         f"Στοιχεία τοποθεσίας:\n"
