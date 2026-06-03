@@ -3,154 +3,77 @@ from geopy.geocoders import Nominatim
 import geopy.exc as geopy_exc
 import google.generativeai as genai
 from pre_kallikratis import map_pre_kallikratis
-
+import time
 
 # Page setup
 st.set_page_config(page_title="Greek Geocoder AI", page_icon="📍", layout="centered")
 st.title("🔍 Greek Geocoder AI 🇬🇷")
-st.write("Ιστορική Γεωγραφική Αναζήτηση για όλα τα χωριά και τις πόλεις της Ελλάδας.")
 
+# --- ΟΙΚΟΝΟΜΙΚΗ ΣΥΝΑΡΤΗΣΗ ΜΕ CACHE ---
+@st.cache_data(ttl=3600)
+def get_ai_historical_data(prompt):
+    # Χρησιμοποιούμε το lite μοντέλο και μηδενική θερμοκρασία για ακρίβεια
+    model = genai.GenerativeModel('gemini-2.0-flash-lite', generation_config={"temperature": 0.0})
+    response = model.generate_content(prompt)
+    return response.text
 
-# Load API key from Streamlit secrets (if present)
-GEMINI_API_KEY = None
+# Load API key
 if "GEMINI_API_KEY" in st.secrets:
-    try:
-        GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
-        genai.configure(api_key=GEMINI_API_KEY)
-    except Exception as e:
-        st.error(f"Σφάλμα ρύθμισης AI: {e}")
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
 else:
-    st.warning("⚠️ Το API Key δεν έχει ρυθμιστεί ακόμα στα Secrets του Streamlit.")
-    GEMINI_API_KEY = None
-
+    st.error("⚠️ Ρύθμισε το API KEY στα Secrets!")
+    st.stop()
 
 # Input form
 with st.form("geocoder_global_form"):
-    street = st.text_input("Οδός / Περιοχή / Χωριό:", placeholder="π.χ. Σοχός, Ζαγκλιβέρι, Ανώγεια, Σουφλί")
+    street = st.text_input("Οδός / Περιοχή / Χωριό:")
     col1, col2 = st.columns(2)
     with col1:
-        number = st.text_input("Αριθμός (αν υπάρχει):", placeholder="e.g. 0")
+        number = st.text_input("Αριθμός:")
     with col2:
-        postal = st.text_input("Ταχυδρομικός Κώδικας (Τ.Κ.):", placeholder="e.g. 57002")
-
+        postal = st.text_input("Τ.Κ.:")
     submit_button = st.form_submit_button("🔍 Εύρεση Στοιχείων", type="primary")
-
 
 if submit_button:
     if not street:
-        st.warning("⚠️ Παρακαλώ εισάγετε μια οδό, περιοχή ή χωριό.")
-    elif not GEMINI_API_KEY:
-        st.error("❌ Δεν βρέθηκε ενεργό API Key στα Secrets του Streamlit. Παρακαλώ προσθέστε το.")
+        st.warning("⚠️ Παρακαλώ εισάγετε περιοχή.")
     else:
-        with st.spinner("🔄 Γίνεται αυτόματη αναζήτηση και ανάλυση Δήμων..."):
-            query = f"{street} {number}, {postal}, Greece" if postal else f"{street} {number}, Greece"
-
+        with st.spinner("🔄 Αναζήτηση..."):
+            query = f"{street} {number}, {postal}, Greece"
             try:
-                geolocator = Nominatim(user_agent="greek_geocoder_final_prod")
+                geolocator = Nominatim(user_agent="greek_geocoder_prod")
                 location = geolocator.geocode(query, addressdetails=True, language="el", country_codes="gr", timeout=10)
 
                 if not location:
-                    st.error("❌ Η διεύθυνση δεν βρέθηκε στο χάρτη. Δοκιμάστε ξανά.")
+                    st.error("❌ Δεν βρέθηκε η τοποθεσία.")
                 else:
                     addr = location.raw.get("address", {})
-                    nomos = addr.get("county") or addr.get("state_district") or addr.get("state") or "—"
-                    dimos = addr.get("municipality") or addr.get("city") or addr.get("town") or "—"
+                    nomos = addr.get("county") or addr.get("state") or "—"
+                    dimos = addr.get("municipality") or addr.get("city") or "—"
 
-                    lat = f"{float(location.latitude):.6f}"
-                    lon = f"{float(location.longitude):.6f}"
-
-                    # Step 1: Try deterministic CSV lookup first
+                    # 1. Deterministic lookup
                     pre_dimos, pre_nomos = map_pre_kallikratis(addr)
-                    if pre_dimos is None:
-                        pre_dimos = "—"
-                    if pre_nomos is None:
-                        pre_nomos = "—"
-
-                    # Comprehensive prompt for LLM fallback with historical context
                     
-                    
-                    prompt = (
-                        f"Είσαι έμπειρος γεωγράφος της Ελλάδας. Πρέπει να βρεις τον Δήμο (Καποδίστριας - Περίοδος 1997-2010) στον οποίο ανήκε η περιοχή.\n\n"
-                        f"Σημερινά δεδομένα:\n"
-                        f"- Τοποθεσία: {location.address}\n"
-                        f"- Σημερινός Δήμος: {dimos}\n"
-                        f"- Σημερινός Νομός: {nomos}\n\n"
-                        f"ΚΑΝΟΝΕΣ:\n"
-                        f"1. Επικεντρώσου ΑΠΟΚΛΕΙΣΤΙΚΑ στον Δήμο του 2009. Αγνοήστε το όνομα του χωριού αν αυτό σε μπερδεύει.\n"
-                        f"2. Αν η τοποθεσία είναι χωριό, βρες τον κύριο Δήμο στον οποίο υπαγόταν διοικητικά το 2009.\n"
-                        f"3. Αν ο Δήμος του 2009 είναι ίδιος με του 2011, γράψε τον κανονικά.\n"
-                        f"4. ΑΠΑΝΤΗΣΗ ΜΟΝΟ σε αυτό το φορμάτ:\n"
-                        f"ΠΡΟ_ΔΗΜΟΣ: [Όνομα Δήμου 2009]\n"
-                        f"ΠΡΟ_ΝΟΜΟΣ: [Όνομα Νομού 2009]"
-                    )
+                    # 2. LLM Fallback (Μόνο αν δεν βρεθεί στο CSV)
+                    if pre_dimos is None or pre_dimos == "—":
+                        prompt = (
+                            f"Είσαι έμπειρος γεωγράφος της Ελλάδας. Βρες τον Δήμο (1997-2010) και τον Νομό (1997-2010).\n"
+                            f"Σημερινά: {location.address}, Δήμος: {dimos}, Νομός: {nomos}.\n"
+                            f"Απάντησε ΜΟΝΟ σε 2 γραμμές:\n"
+                            f"ΠΡΟ_ΔΗΜΟΣ: [Όνομα]\n"
+                            f"ΠΡΟ_ΝΟΜΟΣ: [Όνομα]"
+                        )
+                        ai_text = get_ai_historical_data(prompt)
+                        for line in ai_text.split('\n'):
+                            if line.startswith("ΠΡΟ_ΔΗΜΟΣ:"): pre_dimos = line.replace("ΠΡΟ_ΔΗΜΟΣ:", "").strip()
+                            if line.startswith("ΠΡΟ_ΝΟΜΟΣ:"): pre_nomos = line.replace("ΠΡΟ_ΝΟΜΟΣ:", "").strip()
 
-                    # Call LLM only as optional fallback (if deterministic lookup failed)
-                    import time
-                    if pre_dimos == "—" or pre_nomos == "—":
-                        try:
-                            # Find available model dynamically
-                            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                            
-                            # Try models in order of preference
-                            model_candidates = ['models/gemini-pro', 'models/gemini-1.5-flash', 'models/gemini-2.0-flash']
-                            chosen_model = None
-                            for candidate in model_candidates:
-                                if candidate in available_models:
-                                    chosen_model = candidate
-                                    break
-                            
-                            if not chosen_model:
-                                # Fallback: use first available model
-                                if available_models:
-                                    chosen_model = available_models[0]
-                                else:
-                                    raise Exception("No models with generateContent support found")
-                            
-                            model = genai.GenerativeModel(chosen_model)
-                            
-                            # Retry logic for rate limiting (429 errors)
-                            max_retries = 3
-                            for attempt in range(max_retries):
-                                try:
-                                    response = model.generate_content(prompt)
-                                    ai_text = (response.text or "").strip()
-                                    for line in ai_text.split('\n'):
-                                        if line.startswith("ΠΡΟ_ΔΗΜΟΣ:"):
-                                            pre_dimos = line.replace("ΠΡΟ_ΔΗΜΟΣ:", "").strip()
-                                        if line.startswith("ΠΡΟ_ΝΟΜΟΣ:"):
-                                            pre_nomos = line.replace("ΠΡΟ_ΝΟΜΟΣ:", "").strip()
-                                    break  # Success, exit retry loop
-                                except Exception as retry_err:
-                                    if "429" in str(retry_err) and attempt < max_retries - 1:
-                                        wait_time = 2 ** attempt  # exponential backoff: 1s, 2s, 4s
-                                        st.info(f"Rate limit hit. Retrying in {wait_time}s...")
-                                        time.sleep(wait_time)
-                                    else:
-                                        raise
-                        except Exception as ai_err:
-                            # If LLM fails, just keep deterministic placeholders (no error)
-                            pass
+                    # Display
+                    st.success("✅ Βρέθηκαν στοιχεία!")
+                    col1, col2 = st.columns(2)
+                    col1.metric("Σημερινός Δήμος", dimos)
+                    col2.metric("Ιστορικός Δήμος (2009)", pre_dimos or "—")
+                    st.info(f"📍 {location.address}")
 
-                    # Display results
-                    st.success("✅ Τα στοιχεία εντοπίστηκαν!")
-                    st.markdown(f"### 📍 Αναζήτηση: *{street} {number}*")
-
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        st.info("🏛️ Σημερινή Διοικητική Μορφή")
-                        st.metric(label="Δήμος (Καλλικράτης)", value=dimos)
-                        st.metric(label="Νομός / Περιφέρεια", value=nomos)
-                        st.metric(label="🌍 Γεωγραφικό Πλάτος (Lat)", value=f"{lat}°")
-
-                    with c2:
-                        st.success("📜 Ιστορική Μορφή (Έτος 2009)")
-                        st.metric(label="Δήμος (Καποδίστριας 2009)", value=pre_dimos)
-                        st.metric(label="Ιστορικός Νομός (2009)", value=pre_nomos)
-                        st.metric(label="🧭 Γεωγραφικό Μήκος (Lon)", value=f"{lon}°")
-
-                    st.info(f"🗺️ **Πλήρης Διεύθυνση (OSM):**\n{location.address}")
-
-            except geopy_exc.GeocoderTimedOut:
-                st.error("⚠️ Η αναζήτηση χρονομετρήθηκε. Δοκιμάστε ξανά.")
             except Exception as e:
                 st.error(f"⚠️ Σφάλμα: {e}")
