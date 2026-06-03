@@ -71,20 +71,33 @@ if submit_button:
                     )
 
                     # Call LLM only as fallback
+                    import time
                     try:
-                        chosen_model = 'models/gemini-2.5-pro'
+                        # Use gemini-1.5-flash (better free tier limits than gemini-2.5-pro)
+                        chosen_model = 'models/gemini-1.5-flash'
                         model = genai.GenerativeModel(chosen_model)
-                        response = model.generate_content(prompt)
-                        ai_text = (response.text or "").strip()
-                        for line in ai_text.split('\n'):
-                            if line.startswith("ΠΡΟ_ΔΗΜΟΣ:"):
-                                pre_dimos = line.replace("ΠΡΟ_ΔΗΜΟΣ:", "").strip()
-                            if line.startswith("ΠΡΟ_ΝΟΜΟΣ:"):
-                                pre_nomos = line.replace("ΠΡΟ_ΝΟΜΟΣ:", "").strip()
+                        
+                        # Retry logic for rate limiting (429 errors)
+                        max_retries = 3
+                        for attempt in range(max_retries):
+                            try:
+                                response = model.generate_content(prompt)
+                                ai_text = (response.text or "").strip()
+                                for line in ai_text.split('\n'):
+                                    if line.startswith("ΠΡΟ_ΔΗΜΟΣ:"):
+                                        pre_dimos = line.replace("ΠΡΟ_ΔΗΜΟΣ:", "").strip()
+                                    if line.startswith("ΠΡΟ_ΝΟΜΟΣ:"):
+                                        pre_nomos = line.replace("ΠΡΟ_ΝΟΜΟΣ:", "").strip()
+                                break  # Success, exit retry loop
+                            except Exception as retry_err:
+                                if "429" in str(retry_err) and attempt < max_retries - 1:
+                                    wait_time = 2 ** attempt  # exponential backoff: 1s, 2s, 4s
+                                    st.info(f"Rate limit hit. Retrying in {wait_time}s...")
+                                    time.sleep(wait_time)
+                                else:
+                                    raise
                     except Exception as ai_err:
                         # keep deterministic placeholders if LLM fails
-                        pre_dimos = pre_dimos
-                        pre_nomos = pre_nomos
                         st.warning(f"AI fallback failed: {ai_err}")
 
                     # Display results
