@@ -73,8 +73,24 @@ if submit_button:
                     # Call LLM only as fallback
                     import time
                     try:
-                        # Use gemini-1.5-flash (better free tier limits than gemini-2.5-pro)
-                        chosen_model = 'models/gemini-1.5-flash'
+                        # Find available model dynamically
+                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                        
+                        # Try models in order of preference
+                        model_candidates = ['models/gemini-pro', 'models/gemini-1.5-flash', 'models/gemini-2.0-flash']
+                        chosen_model = None
+                        for candidate in model_candidates:
+                            if candidate in available_models:
+                                chosen_model = candidate
+                                break
+                        
+                        if not chosen_model:
+                            # Fallback: use first available model
+                            if available_models:
+                                chosen_model = available_models[0]
+                            else:
+                                raise Exception("No models with generateContent support found")
+                        
                         model = genai.GenerativeModel(chosen_model)
                         
                         # Retry logic for rate limiting (429 errors)
