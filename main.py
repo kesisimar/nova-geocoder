@@ -1,20 +1,28 @@
 import streamlit as st
 from geopy.geocoders import Nominatim
-import geopy.exc as geopy_exc
 import google.generativeai as genai
 from pre_kallikratis import map_pre_kallikratis
 import time
 
-# Page setup
+# Ρυθμίσεις σελίδας
 st.set_page_config(page_title="Greek Geocoder AI", page_icon="📍", layout="centered")
 st.title("🔍 Greek Geocoder AI 🇬🇷")
 
-# Αρχικοποίηση AI (Με cache για να μην πληρώνουμε API κλήσεις)
+# Αρχικοποίηση AI με μηχανισμό Retry για αποφυγή 429
 @st.cache_data(ttl=3600)
 def get_ai_response(prompt):
     model = genai.GenerativeModel('gemini-1.5-flash')
-    response = model.generate_content(prompt)
-    return response.text
+    retries = 3
+    for i in range(retries):
+        try:
+            response = model.generate_content(prompt)
+            return response.text
+        except Exception as e:
+            if "429" in str(e) and i < retries - 1:
+                time.sleep(2 ** i)  # Αναμονή 1, 2, 4 δευτερόλεπτα
+                continue
+            else:
+                return "ΠΡΟ_ΔΗΜΟΣ: Δεν βρέθηκε\nΠΡΟ_ΝΟΜΟΣ: Δεν βρέθηκε"
 
 # Load API key
 if "GEMINI_API_KEY" in st.secrets:
@@ -44,7 +52,7 @@ if submit_button:
                     nomos = addr.get("county") or addr.get("state") or "—"
                     dimos = addr.get("municipality") or addr.get("city") or "—"
 
-                    # 1. Έλεγχος στο CSV (Ακαριαίο, Δωρεάν)
+                    # 1. Έλεγχος στο CSV
                     pre_dimos, pre_nomos = map_pre_kallikratis(addr)
                     
                     # 2. ΜΟΝΟ αν δεν υπάρχει στο CSV, ρωτάμε το AI
@@ -55,13 +63,10 @@ if submit_button:
                             f"ΠΡΟ_ΔΗΜΟΣ: [Όνομα]\n"
                             f"ΠΡΟ_ΝΟΜΟΣ: [Όνομα]"
                         )
-                        try:
-                            ai_text = get_ai_response(prompt)
-                            for line in ai_text.split('\n'):
-                                if "ΠΡΟ_ΔΗΜΟΣ:" in line: pre_dimos = line.split(":")[1].strip()
-                                if "ΠΡΟ_ΝΟΜΟΣ:" in line: pre_nomos = line.split(":")[1].strip()
-                        except:
-                            st.error("⚠️ Το AI δεν μπόρεσε να απαντήσει (API Limit).")
+                        ai_text = get_ai_response(prompt)
+                        for line in ai_text.split('\n'):
+                            if "ΠΡΟ_ΔΗΜΟΣ:" in line: pre_dimos = line.split(":")[1].strip()
+                            if "ΠΡΟ_ΝΟΜΟΣ:" in line: pre_nomos = line.split(":")[1].strip()
 
                     # Display
                     st.success("✅ Τα στοιχεία εντοπίστηκαν!")
