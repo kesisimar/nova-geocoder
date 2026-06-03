@@ -2,6 +2,7 @@ import streamlit as st
 from geopy.geocoders import Nominatim
 import geopy.exc as geopy_exc
 import google.generativeai as genai
+from pre_kallikratis import map_pre_kallikratis
 
 
 # Page setup
@@ -58,9 +59,12 @@ if submit_button:
                     lat = f"{float(location.latitude):.6f}"
                     lon = f"{float(location.longitude):.6f}"
 
-                    # Deterministic placeholders (will use CSV mapping / fallback LLM)
-                    pre_dimos = "—"
-                    pre_nomos = "—"
+                    # Step 1: Try deterministic CSV lookup first
+                    pre_dimos, pre_nomos = map_pre_kallikratis(addr)
+                    if pre_dimos is None:
+                        pre_dimos = "—"
+                    if pre_nomos is None:
+                        pre_nomos = "—"
 
                     # Strict Greek prompt for LLM fallback (only used when needed)
                     prompt = (
@@ -70,51 +74,52 @@ if submit_button:
                         f"ΠΡΟ_ΝΟΜΟΣ: [Όνομα Νομού το 2009]"
                     )
 
-                    # Call LLM only as fallback
+                    # Call LLM only as optional fallback (if deterministic lookup failed)
                     import time
-                    try:
-                        # Find available model dynamically
-                        available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-                        
-                        # Try models in order of preference
-                        model_candidates = ['models/gemini-pro', 'models/gemini-1.5-flash', 'models/gemini-2.0-flash']
-                        chosen_model = None
-                        for candidate in model_candidates:
-                            if candidate in available_models:
-                                chosen_model = candidate
-                                break
-                        
-                        if not chosen_model:
-                            # Fallback: use first available model
-                            if available_models:
-                                chosen_model = available_models[0]
-                            else:
-                                raise Exception("No models with generateContent support found")
-                        
-                        model = genai.GenerativeModel(chosen_model)
-                        
-                        # Retry logic for rate limiting (429 errors)
-                        max_retries = 3
-                        for attempt in range(max_retries):
-                            try:
-                                response = model.generate_content(prompt)
-                                ai_text = (response.text or "").strip()
-                                for line in ai_text.split('\n'):
-                                    if line.startswith("ΠΡΟ_ΔΗΜΟΣ:"):
-                                        pre_dimos = line.replace("ΠΡΟ_ΔΗΜΟΣ:", "").strip()
-                                    if line.startswith("ΠΡΟ_ΝΟΜΟΣ:"):
-                                        pre_nomos = line.replace("ΠΡΟ_ΝΟΜΟΣ:", "").strip()
-                                break  # Success, exit retry loop
-                            except Exception as retry_err:
-                                if "429" in str(retry_err) and attempt < max_retries - 1:
-                                    wait_time = 2 ** attempt  # exponential backoff: 1s, 2s, 4s
-                                    st.info(f"Rate limit hit. Retrying in {wait_time}s...")
-                                    time.sleep(wait_time)
+                    if pre_dimos == "—" or pre_nomos == "—":
+                        try:
+                            # Find available model dynamically
+                            available_models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+                            
+                            # Try models in order of preference
+                            model_candidates = ['models/gemini-pro', 'models/gemini-1.5-flash', 'models/gemini-2.0-flash']
+                            chosen_model = None
+                            for candidate in model_candidates:
+                                if candidate in available_models:
+                                    chosen_model = candidate
+                                    break
+                            
+                            if not chosen_model:
+                                # Fallback: use first available model
+                                if available_models:
+                                    chosen_model = available_models[0]
                                 else:
-                                    raise
-                    except Exception as ai_err:
-                        # keep deterministic placeholders if LLM fails
-                        st.warning(f"AI fallback failed: {ai_err}")
+                                    raise Exception("No models with generateContent support found")
+                            
+                            model = genai.GenerativeModel(chosen_model)
+                            
+                            # Retry logic for rate limiting (429 errors)
+                            max_retries = 3
+                            for attempt in range(max_retries):
+                                try:
+                                    response = model.generate_content(prompt)
+                                    ai_text = (response.text or "").strip()
+                                    for line in ai_text.split('\n'):
+                                        if line.startswith("ΠΡΟ_ΔΗΜΟΣ:"):
+                                            pre_dimos = line.replace("ΠΡΟ_ΔΗΜΟΣ:", "").strip()
+                                        if line.startswith("ΠΡΟ_ΝΟΜΟΣ:"):
+                                            pre_nomos = line.replace("ΠΡΟ_ΝΟΜΟΣ:", "").strip()
+                                    break  # Success, exit retry loop
+                                except Exception as retry_err:
+                                    if "429" in str(retry_err) and attempt < max_retries - 1:
+                                        wait_time = 2 ** attempt  # exponential backoff: 1s, 2s, 4s
+                                        st.info(f"Rate limit hit. Retrying in {wait_time}s...")
+                                        time.sleep(wait_time)
+                                    else:
+                                        raise
+                        except Exception as ai_err:
+                            # If LLM fails, just keep deterministic placeholders (no error)
+                            pass
 
                     # Display results
                     st.success("✅ Τα στοιχεία εντοπίστηκαν!")
